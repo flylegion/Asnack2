@@ -1,4 +1,4 @@
-name: Android Debug Build
+name: Build APK
 
 on:
   push:
@@ -7,20 +7,20 @@ on:
 
 jobs:
   build:
-    name: Build APK
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up JDK
         uses: actions/setup-java@v3
         with:
-          distribution: 'temurin'
+          distribution: "temurin"
           java-version: 17
 
-      - name: Install Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
@@ -28,20 +28,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Bundle JS for Android
+      - name: Make assets directory
+        run: mkdir -p android/app/src/main/assets
+
+      - name: Bundle JavaScript
         run: |
-          mkdir -p android/app/src/main/assets
-          npx react-native bundle \
+          node ./node_modules/react-native/cli.js bundle \
             --platform android \
             --dev false \
             --entry-file index.js \
             --bundle-output android/app/src/main/assets/index.android.bundle \
             --assets-dest android/app/src/main/res
 
-      - name: Make Gradlew executable
-        run: chmod +x android/gradlew
-
-      - name: Build debug APK
+      - name: Build APK
         run: cd android && ./gradlew assembleDebug
 
       - name: Upload APK
