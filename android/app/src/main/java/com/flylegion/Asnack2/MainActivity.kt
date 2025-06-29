@@ -1,4 +1,4 @@
-package com.asnack2
+package com.flylegion.Asnack2
 
 import android.os.Build
 import android.os.Bundle

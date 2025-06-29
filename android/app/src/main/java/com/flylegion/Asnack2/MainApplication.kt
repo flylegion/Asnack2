@@ -1,4 +1,4 @@
-package com.asnack2
+package com.flylegion.Asnack2
 
 import android.app.Application
 import android.content.res.Configuration
