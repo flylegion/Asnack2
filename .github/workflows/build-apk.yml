@@ -2,49 +2,46 @@ name: Build APK
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout del repositorio
         uses: actions/checkout@v3
 
-      - name: Set up JDK
-        uses: actions/setup-java@v3
-        with:
-          distribution: "temurin"
-          java-version: 17
-
-      - name: Set up Node.js
+      - name: Configurar Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
 
-      - name: Install dependencies
+      - name: Instalar dependencias
         run: npm install
 
-      - name: Make assets directory
+      - name: Instalar CLI de React Native (solo para esta compilación)
+        run: npm install --no-save @react-native-community/cli
+
+      - name: Crear carpeta de assets
         run: mkdir -p android/app/src/main/assets
 
-      - name: Bundle JavaScript
+      - name: Generar el bundle JS
         run: |
           node ./node_modules/react-native/cli.js bundle \
             --platform android \
             --dev false \
             --entry-file index.js \
             --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
+            --assets-dest android/app/src/main/res/
 
-      - name: Build APK
+      - name: Compilar APK de debug
         run: cd android && ./gradlew assembleDebug
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Guardar APK como artefacto
+        uses: actions/upload-artifact@v3
         with:
           name: app-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
