@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
+import { StatusBar } from 'expo-status-bar';
 
 const DEFAULT_URL = 'https://expo.dev/accounts/flylegion/snacks';
 
@@ -18,6 +19,8 @@ export default function SnackBrowser() {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [isReady, setIsReady] = useState(false);
+  const webViewRefs = useRef({});
+  const [isDisconnected, setIsDisconnected] = useState(false);
 
   const isAllowedUrl = (url) => {
     try {
@@ -59,6 +62,7 @@ export default function SnackBrowser() {
           await AsyncStorage.setItem('lastSnackURL', activeTab.url);
         }
       }
+
       appState.current = nextAppState;
     });
     return () => subscription.remove();
@@ -95,6 +99,14 @@ export default function SnackBrowser() {
     }
   };
 
+  const reconnectCurrentTab = () => {
+    const ref = webViewRefs.current[activeTabId];
+    if (ref?.reload) {
+      ref.reload();
+      setIsDisconnected(false);
+    }
+  };
+
   const activeTab = tabs.find(tab => tab.id === activeTabId);
 
   if (!isReady || !activeTab) {
@@ -106,63 +118,94 @@ export default function SnackBrowser() {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.webviewContainer}>
-        {tabs.map((tab) => (
-          <View key={tab.key} style={[styles.webviewWrapper, tab.id === activeTabId ? styles.visible : styles.hidden]}>
-            <WebView
-              source={{ uri: tab.url }}
-              javaScriptEnabled
-              domStorageEnabled
-              startInLoadingState
-              setSupportMultipleWindows={false}
-              onNavigationStateChange={(navState) => handleNavigation(tab.id, navState)}
-              onShouldStartLoadWithRequest={(request) => isAllowedUrl(request.url)}
-              injectedJavaScript={`
-                (function() {
-                  window.open = function(url) {
-                    window.location.href = url;
-                  };
-                  document.addEventListener('DOMContentLoaded', function () {
-                    const links = document.querySelectorAll('a[target="_blank"]');
-                    links.forEach(link => {
-                      link.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        window.location.href = link.href;
+    <>
+      <StatusBar backgroundColor="#1e1e1e" style="light" />
+      <View style={styles.container}>
+        <View style={styles.webviewContainer}>
+          {tabs.map((tab) => (
+            <View
+              key={tab.key}
+              style={[styles.webviewWrapper, tab.id === activeTabId ? styles.visible : styles.hidden]}
+            >
+              <WebView
+                ref={(ref) => (webViewRefs.current[tab.id] = ref)}
+                source={{ uri: tab.url }}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                sharedCookiesEnabled={true}
+                thirdPartyCookiesEnabled={true}
+                cacheEnabled={true}
+                setSupportMultipleWindows={false}
+                startInLoadingState={true}
+                userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Mobile Safari/537.36"
+                onNavigationStateChange={(navState) => handleNavigation(tab.id, navState)}
+                onShouldStartLoadWithRequest={(request) => isAllowedUrl(request.url)}
+                injectedJavaScript={`
+                  (function() {
+                    // Detectar si la conexión con SnackRuntime se pierde
+                    function checkConnection() {
+                      if (!window.SnackRuntime || !window.SnackRuntime.connected) {
+                        window.ReactNativeWebView.postMessage("SNACK_DISCONNECTED");
+                      }
+                    }
+                    setInterval(checkConnection, 4000); // revisa cada 4 segundos
+
+                    // Manejar clicks en enlaces con target _blank
+                    window.open = function(url) {
+                      window.location.href = url;
+                    };
+                    document.addEventListener('DOMContentLoaded', function () {
+                      const links = document.querySelectorAll('a[target="_blank"]');
+                      links.forEach(link => {
+                        link.addEventListener('click', function(e) {
+                          e.preventDefault();
+                          window.location.href = link.href;
+                        });
                       });
                     });
-                  });
-                })();
-                true;
-              `}
-            />
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.tabBarContainer}>
-        <ScrollView horizontal contentContainerStyle={styles.tabBarContent}>
-          {tabs.map((tab) => (
-            <View key={tab.id} style={styles.tab}>
-              <TouchableOpacity onPress={() => setActiveTabId(tab.id)}>
-                <Text style={tab.id === activeTabId ? styles.activeTabText : styles.tabText}>
-                  Tab {tab.id.toString().slice(-4)}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleCloseTab(tab.id)}>
-                <Text style={styles.close}>✕</Text>
-              </TouchableOpacity>
+                  })();
+                  true;
+                `}
+                onMessage={(event) => {
+                  if (event.nativeEvent.data === 'SNACK_DISCONNECTED') {
+                    setIsDisconnected(true);
+                  }
+                }}
+              />
             </View>
           ))}
-          <TouchableOpacity onPress={handleNewTab} style={styles.newTab}>
-            <Text style={styles.newTabText}>＋</Text>
-          </TouchableOpacity>
-        </ScrollView>
+        </View>
 
-        {/* Espaciador extra */}
-        <View style={{ height: 48 }} />
+        {/* Botón flotante de reconexión */}
+        {isDisconnected && (
+          <TouchableOpacity style={styles.reconnectButton} onPress={reconnectCurrentTab}>
+            <Text style={styles.reconnectText}>🔄 Reconectar Snack</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Barra de pestañas */}
+        <View style={styles.tabBarContainer}>
+          <ScrollView horizontal contentContainerStyle={styles.tabBarContent}>
+            {tabs.map((tab) => (
+              <View key={tab.id} style={styles.tab}>
+                <TouchableOpacity onPress={() => setActiveTabId(tab.id)}>
+                  <Text style={tab.id === activeTabId ? styles.activeTabText : styles.tabText}>
+                    Tab {tab.id.toString().slice(-4)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => handleCloseTab(tab.id)}>
+                  <Text style={styles.close}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <TouchableOpacity onPress={handleNewTab} style={styles.newTab}>
+              <Text style={styles.newTabText}>＋</Text>
+            </TouchableOpacity>
+          </ScrollView>
+          <View style={{ height: 48 }} />
+        </View>
       </View>
-    </View>
+    </>
   );
 }
 
@@ -191,6 +234,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e1e',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  reconnectButton: {
+    position: 'absolute',
+    bottom: 96,
+    left: 20,
+    right: 20,
+    backgroundColor: '#444',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  reconnectText: {
+    color: '#00ffcc',
+    fontWeight: 'bold',
   },
   tabBarContainer: {
     backgroundColor: '#222',
