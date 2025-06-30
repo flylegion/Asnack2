@@ -19,8 +19,6 @@ export default function SnackBrowser() {
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [isReady, setIsReady] = useState(false);
-  const webViewRefs = useRef({});
-  const [isDisconnected, setIsDisconnected] = useState(false);
 
   const isAllowedUrl = (url) => {
     try {
@@ -62,7 +60,6 @@ export default function SnackBrowser() {
           await AsyncStorage.setItem('lastSnackURL', activeTab.url);
         }
       }
-
       appState.current = nextAppState;
     });
     return () => subscription.remove();
@@ -80,9 +77,10 @@ export default function SnackBrowser() {
 
   const handleNewTab = () => {
     const timestamp = Date.now();
+    const currentTab = tabs.find(tab => tab.id === activeTabId);
     const newTab = {
       id: timestamp,
-      url: DEFAULT_URL,
+      url: currentTab?.url || DEFAULT_URL,
       key: `webview-${timestamp}`,
     };
     setTabs([...tabs, newTab]);
@@ -91,19 +89,22 @@ export default function SnackBrowser() {
 
   const handleCloseTab = (id) => {
     const remaining = tabs.filter(tab => tab.id !== id);
-    setTabs(remaining);
-    if (activeTabId === id && remaining.length > 0) {
-      setActiveTabId(remaining[remaining.length - 1].id);
-    } else if (remaining.length === 0) {
-      handleNewTab();
-    }
-  };
+    const closedTab = tabs.find(tab => tab.id === id);
 
-  const reconnectCurrentTab = () => {
-    const ref = webViewRefs.current[activeTabId];
-    if (ref?.reload) {
-      ref.reload();
-      setIsDisconnected(false);
+    if (remaining.length === 0) {
+      const timestamp = Date.now();
+      const newTab = {
+        id: timestamp,
+        url: closedTab?.url || DEFAULT_URL,
+        key: `webview-${timestamp}`,
+      };
+      setTabs([newTab]);
+      setActiveTabId(newTab.id);
+    } else {
+      setTabs(remaining);
+      if (activeTabId === id) {
+        setActiveTabId(remaining[remaining.length - 1].id);
+      }
     }
   };
 
@@ -123,37 +124,22 @@ export default function SnackBrowser() {
       <View style={styles.container}>
         <View style={styles.webviewContainer}>
           {tabs.map((tab) => (
-            <View
-              key={tab.key}
-              style={[styles.webviewWrapper, tab.id === activeTabId ? styles.visible : styles.hidden]}
-            >
+            <View key={tab.key} style={[styles.webviewWrapper, tab.id === activeTabId ? styles.visible : styles.hidden]}>
               <WebView
-                ref={(ref) => (webViewRefs.current[tab.id] = ref)}
                 source={{ uri: tab.url }}
-                javaScriptEnabled={true}
-                domStorageEnabled={true}
-                sharedCookiesEnabled={true}
-                thirdPartyCookiesEnabled={true}
-                cacheEnabled={true}
+                javaScriptEnabled
+                domStorageEnabled
+                startInLoadingState
                 setSupportMultipleWindows={false}
-                startInLoadingState={true}
-                userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Mobile Safari/537.36"
                 onNavigationStateChange={(navState) => handleNavigation(tab.id, navState)}
                 onShouldStartLoadWithRequest={(request) => isAllowedUrl(request.url)}
                 injectedJavaScript={`
                   (function() {
-                    // Detectar si la conexión con SnackRuntime se pierde
-                    function checkConnection() {
-                      if (!window.SnackRuntime || !window.SnackRuntime.connected) {
-                        window.ReactNativeWebView.postMessage("SNACK_DISCONNECTED");
-                      }
-                    }
-                    setInterval(checkConnection, 4000); // revisa cada 4 segundos
-
-                    // Manejar clicks en enlaces con target _blank
+                    // Abre enlaces _blank en la misma pestaña
                     window.open = function(url) {
                       window.location.href = url;
                     };
+
                     document.addEventListener('DOMContentLoaded', function () {
                       const links = document.querySelectorAll('a[target="_blank"]');
                       links.forEach(link => {
@@ -163,27 +149,23 @@ export default function SnackBrowser() {
                         });
                       });
                     });
+
+                    // Ping para mantener la conexión WebSocket con Snack
+                    setInterval(() => {
+                      try {
+                        if (window.SnackRuntime && typeof window.SnackRuntime.ping === 'function') {
+                          window.SnackRuntime.ping();
+                        }
+                      } catch (e) {}
+                    }, 5000);
                   })();
                   true;
                 `}
-                onMessage={(event) => {
-                  if (event.nativeEvent.data === 'SNACK_DISCONNECTED') {
-                    setIsDisconnected(true);
-                  }
-                }}
               />
             </View>
           ))}
         </View>
 
-        {/* Botón flotante de reconexión */}
-        {isDisconnected && (
-          <TouchableOpacity style={styles.reconnectButton} onPress={reconnectCurrentTab}>
-            <Text style={styles.reconnectText}>🔄 Reconectar Snack</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Barra de pestañas */}
         <View style={styles.tabBarContainer}>
           <ScrollView horizontal contentContainerStyle={styles.tabBarContent}>
             {tabs.map((tab) => (
@@ -234,21 +216,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e1e',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  reconnectButton: {
-    position: 'absolute',
-    bottom: 96,
-    left: 20,
-    right: 20,
-    backgroundColor: '#444',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    zIndex: 999,
-  },
-  reconnectText: {
-    color: '#00ffcc',
-    fontWeight: 'bold',
   },
   tabBarContainer: {
     backgroundColor: '#222',
